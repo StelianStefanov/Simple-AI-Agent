@@ -13,4 +13,4 @@ def format_json_output(expression: str, result: float, indent: int = 2) -> str:
         "expression": expression,
         "result": result_to_dump,
     }
-    return json.dumps(output_data, indent=indent)
+    return json.dumps(output_data, indent=indent, allow_nan=False)

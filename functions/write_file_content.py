@@ -23,31 +23,42 @@ schema_write_file = {
 }
 
 def write_file(working_directory: str, file_path: str, content: str) -> str:
+    import secrets
+    import stat
+
+    from config import MAX_WRITE_CHARS
+    from functions.workspace import directory_fd, path_parts, file_error, WorkspaceError
+
     try:
-        absolute_path: str = os.path.abspath(working_directory)  
-        target_file: str = os.path.normpath(os.path.join(absolute_path, file_path))
-
-        valid_target_dir: bool = os.path.commonpath([absolute_path, target_file]) == absolute_path
-        
-        if not valid_target_dir:
-            return f'Error: Cannot write "{file_path}" as it is outside the permitted working directory'
-
-        if os.path.isdir(target_file):
-            return f'Error: Cannot write to "{file_path}" as it is a directory'
-
-        os.makedirs(os.path.dirname(target_file), exist_ok=True)
-
-        with open(target_file, "w") as f:
-            f.write(content)
-
+        if not isinstance(content, str) or len(content) > MAX_WRITE_CHARS:
+            raise WorkspaceError(f"Content must be text of at most {MAX_WRITE_CHARS} characters")
+        # Validate encoding before touching an existing file or creating directories.
+        encoded = content.encode("utf-8")
+        parts = path_parts(file_path)
+        with directory_fd(working_directory, parts[:-1], create=True) as parent:
+            mode = 0o600
+            try:
+                existing = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False)
+                if not stat.S_ISREG(existing.st_mode):
+                    raise WorkspaceError("Target must be a regular file, not a symlink or directory")
+                mode = stat.S_IMODE(existing.st_mode) & 0o777
+            except FileNotFoundError:
+                pass
+            temporary = f".agent-write-{secrets.token_hex(16)}"
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(encoded)
+                    stream.flush()
+                    os.fchmod(stream.fileno(), mode)
+                    os.fsync(stream.fileno())
+                os.replace(temporary, parts[-1], src_dir_fd=parent, dst_dir_fd=parent)
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
         return f'Successfully wrote to "{file_path}" ({len(content)} characters written)'
-    except PermissionError:
-        return f'Error: Permission denied when writing to "{file_path}"'
-    except IsADirectoryError:
-        return f'Error: "{file_path}" is a directory, not a file'
-    except FileNotFoundError:
-        return f'Error: Path to "{file_path}" not found'
-    except ValueError:
-        return f'Error: Cannot write "{file_path}" as it is outside the permitted working directory'
-    except OSError as e:
-        return f'Error: Failed to write "{file_path}": {e.strerror}'
+    except (OSError, ValueError, TypeError) as exc:
+        return file_error(exc)

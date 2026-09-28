@@ -33,6 +33,20 @@ class TestCalculator(unittest.TestCase):
         result = self.calculator.evaluate("2 * 3 - 8 / 2 + 5")
         self.assertEqual(result, 7)
 
+    def test_invalid_grammar(self):
+        for expression in ("3 5 +", "+ 3 5", "3 +", "3 + * 5", "3 5"):
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                self.calculator.evaluate(expression)
+
+    def test_nonfinite_values(self):
+        for expression in ("nan", "inf", "1e309", "1e308 * 1e308"):
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                self.calculator.evaluate(expression)
+
+    def test_signed_operands_and_associativity(self):
+        self.assertEqual(self.calculator.evaluate("-3 + 5"), 2)
+        self.assertEqual(self.calculator.evaluate("10 - 3 - 2"), 5)
+
     def test_empty_expression(self) -> None:
         result = self.calculator.evaluate("")
         self.assertIsNone(result)

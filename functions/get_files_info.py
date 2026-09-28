@@ -20,33 +20,32 @@ schema_get_files_info = {
 
 
 def get_files_info(working_directory: str, directory: str = ".") -> str:
+    from config import MAX_CHARS, MAX_DIRECTORY_ENTRIES
+    from functions.workspace import directory_fd, path_parts, file_error
+
     try:
-        absolute_path: str = os.path.abspath(working_directory)  # noqa: PTH100
-        target_dir: str = os.path.normpath(os.path.join(absolute_path, directory))  # noqa: PTH118
-        
-        valid_target_dir: bool = os.path.commonpath([absolute_path, target_dir]) == absolute_path
-
-        if not valid_target_dir:
-            return f'Error: Cannot list "{directory}" as it is outside the permitted working directory'
-
-        if not os.path.isdir(target_dir):
-            return f'Error: "{directory}" is not a directory'
-
-        
-        
-        if os.path.isdir(target_dir):
-            sub_dirs = os.listdir(target_dir)
+        with directory_fd(working_directory, path_parts(directory, allow_root=True)) as fd:
             messages = []
-            for sub_dir in sub_dirs:
-                abs_sub_dir = f"{target_dir}/{sub_dir}"
-                size = os.path.getsize(abs_sub_dir)
-                is_dir = os.path.isdir(abs_sub_dir)
-                messages.append(f"{sub_dir}: file_size={size} bytes, is_dir={is_dir}")
-                
+            length = 0
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    if len(messages) >= MAX_DIRECTORY_ENTRIES:
+                        messages.append("[...Directory listing truncated]")
+                        break
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                        line = (
+                            f"{entry.name!r}: file_size={info.st_size} bytes, "
+                            f"is_dir={entry.is_dir(follow_symlinks=False)}, "
+                            f"is_symlink={entry.is_symlink()}"
+                        )
+                    except OSError:
+                        line = f"{entry.name!r}: metadata unavailable"
+                    if length + len(line) + 1 > MAX_CHARS:
+                        messages.append("[...Directory listing truncated]")
+                        break
+                    messages.append(line)
+                    length += len(line) + 1
             return "\n".join(messages)
-    except PermissionError:
-        return f'Error: Permission denied when accessing "{directory}"'
-    except FileNotFoundError:
-        return f'Error: "{directory}" not found (it may have been removed)'
-    except ValueError:
-        return f'Error: Cannot list "{directory}" as it is outside the permitted working directory'
+    except (OSError, ValueError, TypeError) as exc:
+        return file_error(exc)

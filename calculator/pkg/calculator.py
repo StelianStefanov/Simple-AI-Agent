@@ -1,5 +1,6 @@
 # calculator/pkg/calculator.py
 
+import math
 from collections.abc import Callable
 
 
@@ -28,8 +29,12 @@ class Calculator:
         values: list[float] = []
         operators: list[str] = []
 
+        expect_operand = True
         for token in tokens:
             if token in self.operators:
+                if expect_operand:
+                    raise ValueError(f"expected a number, got {token}")
+                expect_operand = True
                 while (
                     operators
                     and operators[-1] in self.operators
@@ -38,11 +43,19 @@ class Calculator:
                     self._apply_operator(operators, values)
                 operators.append(token)
             else:
+                if not expect_operand:
+                    raise ValueError(f"expected an operator, got {token}")
+                expect_operand = False
                 try:
-                    values.append(float(token))
+                    number = float(token)
+                    if not math.isfinite(number):
+                        raise ValueError("numbers must be finite")
+                    values.append(number)
                 except ValueError:
                     raise ValueError(f"invalid token: {token}")
 
+        if expect_operand:
+            raise ValueError("expression must end with a number")
         while operators:
             self._apply_operator(operators, values)
 
@@ -61,4 +74,7 @@ class Calculator:
 
         b = values.pop()
         a = values.pop()
-        values.append(self.operators[operator](a, b))
+        result = self.operators[operator](a, b)
+        if not math.isfinite(result):
+            raise ValueError("result must be finite")
+        values.append(result)
